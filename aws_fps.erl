@@ -44,7 +44,8 @@
 -import(aws_util, [tuple_3to2/1]).
 
 %-compile(export_all).
--export([get_account_activity/12,	
+-export([init/0,
+		get_account_activity/12,	
 		get_account_balance/3,	
 		subscribe_for_caller_notification/5,	
 		un_subscribe_for_caller_notification/4,	
@@ -75,6 +76,12 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Actual AWS API calls.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%
+%% Initialize AWS APIs.
+%%
+init() ->
+	{ok, ModelFPS} = erlsom:compile_xsd_file("fps.xsd", [{prefix, "fps"}]), ModelFPS.
 
 %%
 %% GetAccountActivity

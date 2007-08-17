@@ -78,7 +78,6 @@
 % Helper Methods used to construct URLs to access AWS.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--define(FPS_BASE_URL, "https://fps.amazonaws.com/").
 -define(FPS_SANDBOX_URL, "https://fps.sandbox.amazonaws.com").
 -define(VERSION, "2007-01-08").
 
