@@ -7,13 +7,13 @@ erlang. erl + AWS = erlawys (pronounced erlways).
 
 It currently implements the following APIs that amazon offers.
 ec2: Elastic Compute Cloud (2007-03-01)
-fps: Flexible Payments Service (2007-01-08)
+fps: Flexible Payments Service (2007-01-08) [USE AT YOUR OWN RISK!]
 s3 : NOT IMPLEMENTED
 sqs: NOT IMPLEMENTED
 
 The current version is 0.1. It is not production ready and has undergone
 minimal testing. In particular ec2 has only undergone rudimentary testing
-(as expressed by aws_ec2_test) and fps has undergone no testing.
+(as expressed by aws_ec2_test) and fps has undergone NO testing.
 
 DEPENDENCIES
 ------------
@@ -26,7 +26,7 @@ ISSUES
 One issue that came up was that often times the AWS result would come back
 with an error. Often the error would occur several times in a row. In order
 to overcome this issue I added a function called try_again/3, which will
-attempt to execute the given function Count times. Count is defaults to 100.
+attempt to execute the given function Count times. Count defaults to 100.
 
 If you see the following during an execution run:
 
@@ -48,7 +48,7 @@ in my database, or my code generation.
 
 This is why I have the FPS API implemented. But I have not tested it as I
 don't have an FPS account yet. But I thought since I could generate the code
-I might as well include it. Perhaps someone can let me know if it works.
+I might as well include it.
 
 TRY ME
 ------
@@ -104,18 +104,18 @@ and see before I did anything. Of course if anyone else has implemented these AP
 I would be happy to include them.
 
 I would like to add a layer on top of the aws_ec2/fps APIs. They are pretty
-rudimentary and use ERLSOM to make things easier. However, I think it would be nice
-to abstract it some more, so we don't have to deal with XML style records. Something
-simpler would be nice.
+rudimentary and use ERLSOM to make things easier. However, I think it would be
+nice to abstract it some more, so we don't have to deal with XML style records.
+Something simpler would be nice.
 
 LICENSE
 -------
-This is licensed under the University of Illinois/NCSA Open Source License, with my
-name instead of NCSA. This is basically the same as the New BSD license as far as
-I can tell. See http://www.opensource.org/licenses/UoI-NCSA.php.
+This is licensed under the University of Illinois/NCSA Open Source License, with
+my name instead of NCSA. This is basically the same as the New BSD license as
+far as I can tell. See http://www.opensource.org/licenses/UoI-NCSA.php.
 
-If people object to this license I will consider switching it to the New BSD license.
-I just used this one because I used to work at NCSA.
+If people object to this license I will consider switching it to the New BSD
+license. I just used this one because I used to work at NCSA.
 
 CONTACT INFO
 ------------
