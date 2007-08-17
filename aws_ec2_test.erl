@@ -41,10 +41,13 @@
 -vcn('0.1').
 -date('2007/07/31').
 
--compile(export_all).
--export([test_simple/2]).
+%-compile(export_all).
+-export([init_tests/0, test_simple/3]).
+
+-include_lib("ec2.hrl").
 
 -define(LAUNCH_INSTANCE, "ami-23b6534a").
+
 
 %% Example session:
 %% > erl
@@ -61,9 +64,9 @@
 %% {ok,aws_ec2}
 %% 5> c(aws_ec2_test).
 %% {ok,aws_ec2_test}
-%% 6> aws_ec2_test:init_tests().
+%% 6> Model = aws_ec2_test:init_tests().
 %% ok
-%% 7> aws_ec2_test:test_simple(Key, AccessKey).
+%% 7> aws_ec2_test:test_simple(Key, AccessKey, Model).
 %% Attempting to Launch first instance: {"ami-23b6534a",
 %% ...
 
@@ -72,7 +75,8 @@
 init_tests() ->
 	crypto:start(),
 	inets:start(),
-	ssl:start().
+	ssl:start(),
+	aws_ec2:init().
 
 
 %% This is a test/example program which will
@@ -94,12 +98,12 @@ init_tests() ->
 %% recall the API. Need to figure out if its my code, erlang, or AWS
 %% that is causing the problem. Perhaps its just the nature of 
 %% the thing.
-test_simple(Key, AccessKey) ->
-	test_simple(Key, AccessKey, 10).
-test_simple(Key, AccessKey, Count) ->
+test_simple(Key, AccessKey, Model) ->
+	test_simple(Key, AccessKey, Model, 100).
+test_simple(Key, AccessKey, Model, Count) ->
 	% Get Description of all images.
-	Instances = try_again(
-		fun(K, A) -> aws_ec2:describe_images(K, A) end,
+	{ok, Instances} = try_again(
+		fun(K, A) -> aws_ec2:describe_images(K, A, Model) end,
 		[Key, AccessKey],
 		Count),
 		
@@ -107,85 +111,110 @@ test_simple(Key, AccessKey, Count) ->
 	MyInstance = extract_instance(?LAUNCH_INSTANCE, Instances),
 	
 	% Now run the image.
-	io:format("Attempting to Launch first instance: ~p~n", [MyInstance]),
+	LaunchInstance = MyInstance#'ec2:DescribeImagesResponseItemType'.imageId,
+	io:format("Attempting to Launch first instance: ~p~n", [LaunchInstance]),
 	LaunchedInstance = try_again(
-		fun(K, A, E) -> aws_ec2:run_instance(K, A, E) end,
-		[Key, AccessKey, element(1, MyInstance)],
+		fun(K, A, E) -> aws_ec2:run_instance(K, A, Model, E) end,
+%		fun(_, _, _) -> {ok, "xml"} end,
+		[Key, AccessKey, LaunchInstance],
 		Count),
 	io:format("Launched first instance ~p~n", [LaunchedInstance]),
 	
 	% Run the same image a second time.
-	io:format("Attempting to Launch second instance ~p~n", [MyInstance]),
+	io:format("Attempting to Launch second instance ~p~n", [LaunchInstance]),
 	LaunchedInstance2 = try_again(
-		fun(K, A, E) -> aws_ec2:run_instance(K, A, E) end,
-		[Key, AccessKey, element(1, MyInstance)],
+		fun(K, A, E) -> aws_ec2:run_instance(K, A, Model, E) end,
+%		fun(_, _, _) -> {ok, "xml"} end,
+		[Key, AccessKey, LaunchInstance],
 		Count),
 	io:format("Launched second instance ~p~n", [LaunchedInstance2]),
-	io:format("Wait for 5 seconds for instances to settle in.~n"),
-	sleep(5000),
+	io:format("Wait for 10 seconds for instances to settle in.~n"),
+	sleep(10000),
 	
 	% Get a description of whats going on.
-	DescribedInstances = try_again(
-		fun(K, A) -> aws_ec2:describe_instances(K, A) end,
+	{ok, DescribedInstances} = try_again(
+		fun(K, A) -> aws_ec2:describe_instances(K, A, Model) end,
 		[Key, AccessKey],
 		Count),
 	io:format("Current status of instances is ~n~p~n", [DescribedInstances]),
 	
 	% Get information on first instance so we can manipulate it.
-	FirstInstanceId = extract_instance_id(LaunchedInstance),
+	InstanceIds = extract_value(DescribedInstances, fun(I) -> extract_pending_or_running(I) end),
+	[FirstInstanceId | _] = InstanceIds,
 	
 	% Wait until the first instance is running.
 	io:format("Wait until instance ~p is running...~n", [FirstInstanceId]),
-	DnsName = poll_until_not_pending(Key, AccessKey, FirstInstanceId, Count),
+	DnsName = poll_until_not_pending(Key, AccessKey, Model, atom_to_list(FirstInstanceId), Count),
 	io:format("Instance ~p is now running! Wait for 1 minute so it can start up httpd.~n", [FirstInstanceId]),
-	
+
 	% After instance starts up wait for one minute to allow HTTPD to start up.
 	sleep(60000),
 	
 	% Run a request for the root document at the first instance.
-	io:format("Requesting HTTP from instance @ ~p~n", [DnsName]),
-	Result = try_again(
-		fun(U) -> http:request(U) end,
-		["http://" ++ DnsName],
-		Count),
-	io:format("HTTP result is~n~p~n", [Result]),
+	if DnsName =/= null ->
+		io:format("Requesting HTTP from instance @ ~p~n", [DnsName]),
+		Result = try_again(
+			fun(U) -> http:request(U) end,
+			["http://" ++ DnsName],
+			Count),
+		io:format("HTTP result is~n~p~n", [Result]);
+	true ->
+		io:format("The instance is already terminated.")
+	end,
 	
-	% Get list of all instances (including already terminated, should probably filter them).
-	InstancesToTerminate = extract_instances_to_terminate(DescribedInstances),
-	io:format("Will terminate instances~n~p~n", [InstancesToTerminate]),
+	% List of instances to kill!
+	{ok, CurrentDescribedInstances} = try_again(
+		fun(K, A) -> aws_ec2:describe_instances(K, A, Model) end,
+		[Key, AccessKey],
+		Count),
+	CurrentRunningInstances = extract_value(CurrentDescribedInstances, fun(I) -> extract_running(I) end),
+	InstancesToTerminate = lists:map(fun(A) -> atom_to_list(A) end, CurrentRunningInstances),
+	io:format("Instances to terminate: ~p~n", [InstancesToTerminate]),
 	
 	% Terminate the instances.
-	DeadInstances = try_again(
-		fun(K, A, L) -> aws_ec2:terminate_instances(K, A, L) end,
+	{ok, DeadInstances} = try_again(
+		fun(K, A, L) -> aws_ec2:terminate_instances(K, A, Model, L) end,
 		[Key, AccessKey, InstancesToTerminate],
 		Count),
 	io:format("Terminated instances~n~p~n", [DeadInstances]),
 	
 	% Tell user what the current state is.
 	FinalState = try_again(
-		fun(K, A) -> aws_ec2:describe_instances(K, A) end,
+		fun(K, A) -> aws_ec2:describe_instances(K, A, Model) end,
 		[Key, AccessKey],
 		Count),
-	io:format("Final status of instances is ~n~p~n", [FinalState]).
-	
-	% We are DONE!
+	io:format("Final status of instances is ~n~p~n", [FinalState]),
+
+	io:format("Done!~n").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Helper Methods used to run the test case.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% Polls AWS to see if the image is running or not.
-poll_until_not_pending(Key, AccessKey, Instance, Count) ->
-	DescribedInstances = try_again(
-		fun(K, A, I) -> aws_ec2:describe_instances(K, A, I) end,
+poll_until_not_pending(Key, AccessKey, Model, Instance, Count) ->
+	{ok, DescribedInstances} = try_again(
+		fun(K, A, I) -> aws_ec2:describe_instances(K, A, Model, I) end,
 		[Key, AccessKey, [Instance]],
 		Count),
-	[{_, _, _, [{Instance, _, _, State, _, DnsAddress, _, _}]}] = DescribedInstances,
+	[RunningInstance | _] = extract_value(DescribedInstances,
+		fun(I) ->
+			if I#'ec2:RunningInstancesItemType'.instanceId =:= Instance ->
+				I;
+			true ->
+				[]
+			end
+		 end),
+	InstanceState = RunningInstance#'ec2:RunningInstancesItemType'.instanceState,
+	State = InstanceState#'ec2:InstanceStateType'.'name',
+	DnsAddress = RunningInstance#'ec2:RunningInstancesItemType'.dnsName,
 	if State =:= "running" andalso DnsAddress =/= null ->
 		DnsAddress;
+	State =:= "terminated" ->
+		null;
 	true ->
 		sleep(10000),
-		poll_until_not_pending(Key, AccessKey, Instance, Count)
+		poll_until_not_pending(Key, AccessKey, Model, Instance, Count)
 	end.
 
 %% Sleep for T millis.
@@ -199,54 +228,63 @@ sleep(T) ->
 %% Try to execute function F Count times before giving up.
 %% Negative value will never stop.
 try_again(F, Params, Count) ->
-	try apply(F, Params)
+	try apply(F, Params) of
+		{ok, _}   =R -> R;
+		{error, _}=R -> 
+			if Count =:= 0 ->
+				R;
+			true ->
+				io:format("Failed in calling ~p on count ~p~n", [F, Count]),
+				try_again(F, Params, Count-1)
+			end
 	catch
 		error:Term ->
-			if Count =/= 0 ->
-				io:format("Failed in calling ~p on count ~p~n", [F, Count]),
-				try_again(F, Params, Count-1);
+			if Count =:= 0 ->
+				{error, Term};
 			true ->
-				{error, Term}
+				io:format("Failed in calling ~p on count ~p~n", [F, Count]),
+				try_again(F, Params, Count-1)
 			end
 	end.
 	
 %% Extract Instance w/ name Name.
-extract_instance(Name, [{Name, _, _, _, _}=R|_T]) -> R;
-extract_instance(Name, [_H|T]) -> extract_instance(Name, T);
-extract_instance(_Name, []) -> null.
+extract_instance(Name, Response) when is_record(Response, 'ec2:DescribeImagesResponseType') -> 
+	ImagesSet = Response#'ec2:DescribeImagesResponseType'.imagesSet,
+	Item = ImagesSet#'ec2:DescribeImagesResponseInfoType'.item,
+	extract_instance_from_list(Name, Item).
+	
+extract_instance_from_list(Name, [#'ec2:DescribeImagesResponseItemType'{imageId=Name}=R|_T]) -> R;
+extract_instance_from_list(Name, [_H|T]) -> extract_instance_from_list(Name, T);
+extract_instance_from_list(_Name, []) -> null.
 
-%% Extract instance id from description.
-extract_instance_id({_, _, _, [{Instance, _, _, _, _, _, _, _}]}) ->
-	Instance;
-extract_instance_id(_X) ->
-	null.
+%% Extract values from description.
+extract_value(Response, F) when is_record(Response, 'ec2:DescribeInstancesResponseType') -> 
+	ReservationSet = Response#'ec2:DescribeInstancesResponseType'.reservationSet,
+	ReservationInfoList = ReservationSet#'ec2:ReservationSetType'.item,
+	extract_values_from_reservation_list(F, ReservationInfoList, []).
+	
+extract_values_from_reservation_list(F, [R | T], A) ->
+	RunningInstancesSet = R#'ec2:ReservationInfoType'.instancesSet,
+	RunningInstancesItemList = RunningInstancesSet#'ec2:RunningInstancesSetType'.item,
+	Ids = [ F(I) || I <- RunningInstancesItemList],
+	extract_values_from_reservation_list(F, T, [Ids | A]);
+extract_values_from_reservation_list(_, [], A) ->
+	lists:flatten(lists:reverse(A)).
+	
+% Extract running instances...
+extract_running(I) ->
+	extract_with_state(I, ["running"]).
+extract_pending(I) ->
+	extract_with_state(I, ["pending"]).
+extract_pending_or_running(I) ->
+	extract_with_state(I, ["pending", "running"]).
 
-%% Extract DNS name. Not used, since we get that from poll_until_not_pending().
-extract_dns_name([{_, _, _, [{_, _, _, _, _, DnsName, _, _}]}|_T]) ->
-	DnsName;
-extract_dns_name(_X) ->
-	null.
-
-%% Get list of all instances we need to terminate.
-%% Note, should probably filter already terminated instances.
-extract_instances_to_terminate(L) ->
-	extract_instances_to_terminate(L, []).
-extract_instances_to_terminate([{_, _, _, Instances}|T], L) ->
-	extract_instances_to_terminate(T, extract_instances_from_list(Instances, L));
-extract_instances_to_terminate([], L) ->
-	L.
-	
-%extract_instances_from_list([{InstanceId, _, _, "running", _, _, _, _}|T], L) ->
-extract_instances_from_list([{InstanceId, _, _, _, _, _, _, _}|T], L) ->
-	[InstanceId|extract_instances_from_list(T, L)];
-extract_instances_from_list([_H|T], L) ->
-	extract_instances_from_list(T, L);
-extract_instances_from_list([], L) ->
-	L.
-
-	
-	
-	
-	
-	
-	
+extract_with_state(I, S) ->
+	InstanceState = I#'ec2:RunningInstancesItemType'.instanceState,
+	State = InstanceState#'ec2:InstanceStateType'.'name',
+	IsMember = lists:member(State, S),
+	if IsMember ->
+		list_to_atom(I#'ec2:RunningInstancesItemType'.instanceId);
+	true ->
+		[]
+	end.

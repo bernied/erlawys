@@ -40,10 +40,13 @@
 -vcn('0.1').
 -date('2007/07/28').
 
--import(string, [to_lower/1]).
+-include_lib("ec2.hrl").
+
+-import(aws_util, [filter_nulls/1, params_signature/2, replace_colons/1, add_default_params/3, create_ec2_param_list/2]).
 
 %-compile(export_all).
--export([authorize_security_group_ingress/5,	
+-export([ec2_url/2,
+		authorize_security_group_ingress/5,	
 		authorize_security_group_ingress/7,
 		confirm_product_instance/4,	
 		create_key_pair/3,	
@@ -72,6 +75,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 -define(EC2_BASE_URL, "https://ec2.amazonaws.com/").
+-define(VERSION, "2007-03-01").
 
 
 % Construct the URL for accessing a web services from ec2.
@@ -84,49 +88,8 @@ ec2_url_1([{K, V}], Data) -> ec2_url_1([], ["?", K, "=", replace_colons(V) | Dat
 ec2_url_1([{K, V}|T], Data) -> ec2_url_1(T, ["&", K, "=", replace_colons(V) | Data]);
 ec2_url_1([], Data) -> lists:flatten(Data).
 
-% Remove nulls from parameter list.
-filter_nulls([{_,null}|T]) -> filter_nulls(T);
-filter_nulls([H|T]) -> [H|filter_nulls(T)];
-filter_nulls([]) -> [].
+add_default_params(Params, AccessKey) -> add_default_params(Params, AccessKey, ?VERSION).
 
-% Function to sort params list.
-sort_params(Params) -> lists:sort(fun({A, _}, {X, _}) -> to_lower(A) < to_lower(X) end, Params).
-
-% Make sure you call crypto:start() before using this code.
-params_signature(Key, Params) -> params_signature(Key, sort_params(Params), []).
-%params_signature(Key, [{_, null}|T], Data) -> params_signature(Key, T, Data);
-params_signature(Key, [{K, V}|T], Data) -> params_signature(Key, T, [V,K|Data]);
-params_signature(Key, [], Data) -> Signature = lists:flatten(lists:reverse(Data)), base64:encode(crypto:sha_mac(Key, Signature)).
-
-% Replace ':' with %3A for the URL's to be legal.
-replace_colons([$:|T]) -> [$%, $3, $A|replace_colons(T)];
-replace_colons([H|T]) -> [H|replace_colons(T)];
-replace_colons([]) -> [];
-replace_colons(X) -> X.
-
-% Add default values to list.
-add_default_params(Params, AccessKey) -> add_default_params(Params, AccessKey, "2007-03-01").
-add_default_params(Params, AccessKey, Version) ->
-	NewParams = [{"AWSAccessKeyId", AccessKey},
-	 {"Timestamp", create_timestamp()},
-	 {"SignatureVersion", "1"},
-	 {"Version", Version}
-	| Params], sort_params(NewParams).
-	
-% Time utility function
-add_zeros(L) -> if length(L) == 1 -> [$0|L]; true -> L end.
-to_str(L) -> add_zeros(integer_to_list(L)).
-
-create_timestamp() -> create_timestamp(calendar:now_to_universal_time(now())).
-create_timestamp({{Y, M, D}, {H, Mn, S}}) ->
-	to_str(Y) ++ "-" ++ to_str(M) ++ "-" ++ to_str(D) ++ "T" ++
-	to_str(H) ++ ":" ++ to_str(Mn)++ ":" ++ to_str(S) ++ "Z".
-
-% Create a list of name/value pairs for ec2 parameters.
-create_ec2_param_list(Name, Params) -> create_ec2_param_list(Name, Params, 1).
-create_ec2_param_list(_, null, _) -> [];
-create_ec2_param_list(Name, [H|T], C) -> [{Name ++ "." ++ integer_to_list(C), H} | create_ec2_param_list(Name, T, C + 1)];
-create_ec2_param_list(_, [], _) -> [].
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Implementation of Amazon EC2 API.
